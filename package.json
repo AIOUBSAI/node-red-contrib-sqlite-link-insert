@@ -1,0 +1,45 @@
+{
+  "name": "node-red-contrib-sqlite-link-insert",
+  "version": "0.1.0",
+  "description": "A Node-RED node for grouped multi-table SQLite inserts with UPSERT, mapping, key lookups, and optional config-file support.",
+  "keywords": [
+    "node-red",
+    "node-red-contrib",
+    "sqlite",
+    "database",
+    "insert",
+    "bulk",
+    "upsert",
+    "jsonata",
+    "returning"
+  ],
+  "author": "sai aioub <sai.aioub@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/AIOUBSAI/node-red-contrib-sqlite-link-insert#readme",
+  "bugs": {
+    "url": "https://github.com/AIOUBSAI/node-red-contrib-sqlite-link-insert/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AIOUBSAI/node-red-contrib-sqlite-link-insert.git"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "node-red": {
+    "version": ">=3.0.0",
+    "nodes": {
+      "sqlite-link-insert": "sqlite-link-insert.js"
+    }
+  },
+  "dependencies": {
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {},
+  "files": [
+    "sqlite-link-insert.js",
+    "sqlite-link-insert.html",
+    "README.md",
+    "LICENSE"
+  ]
+}

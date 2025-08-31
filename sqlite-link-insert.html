@@ -1,0 +1,428 @@
+<!-- sqlite-link-insert.html -->
+<style>
+  .sli{ --b:var(--nr-editor-border,#e3e3e3); --muted:rgba(0,0,0,.6) }
+  .sli .row{ margin:10px 0 }
+  .sli label{ display:block; font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:6px }
+  .sli input[type="text"], .sli input[type="number"], .sli select, .sli textarea{ width:100% !important; box-sizing:border-box }
+  .sli .card{ border:1px solid var(--b); padding:10px 12px; background:var(--nr-editor-sidebar-background,#f8f9fb); border-radius:6px }
+  .sli .inline{ display:grid; gap:10px }
+  @media (min-width:980px){ .sli .inline.cols-2{grid-template-columns:1fr 1fr} .sli .inline.cols-3{grid-template-columns:1fr 1fr 1fr} .sli .inline.cols-4{grid-template-columns:1fr 1fr 1fr 1fr} }
+  .sli table{ width:100%; border-collapse:collapse }
+  .sli th,.sli td{ border-bottom:1px solid var(--b); padding:6px 4px }
+  .sli thead th{ background: var(--nr-editor-button-background,#f6f6f6); font-weight:700 }
+  .sli .right{ text-align:right }
+  .sli .hint{ font-size:12px; color:var(--muted) }
+  .sli .btn-link{ background:transparent; border:none; color:var(--nr-primary-text-color,#c00); cursor:pointer; padding:0 6px }
+  .ui-dialog .ui-dialog-buttonpane .ui-dialog-buttonset .primary{ background:#c00; color:#fff }
+</style>
+
+<script type="text/x-red" data-template-name="sqlite-link-insert">
+  <div class="sli">
+    <div class="row">
+      <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+      <input type="text" id="node-input-name" placeholder="sqlite-link-insert">
+    </div>
+
+    <!-- CONFIG FILE -->
+    <div class="row card">
+      <div class="inline cols-4">
+        <div>
+          <label><i class="fa fa-cog"></i> Use config file</label>
+          <label><input type="checkbox" id="sli-cfg-use"> Enable</label>
+        </div>
+        <div>
+          <label><i class="fa fa-folder-open"></i> Config path (.json under userDir)</label>
+          <input type="text" id="sli-cfg-path" placeholder="configs/insert_template.json">
+          <div class="hint">Relative to <code>userDir</code>, must end with <code>.json</code></div>
+        </div>
+        <div>
+          <label><i class="fa fa-lock"></i> Lock to file (use at runtime)</label>
+          <label><input type="checkbox" id="sli-cfg-lock"> Use file on deploy</label>
+        </div>
+        <div>
+          <label><i class="fa fa-refresh"></i> Watch file (auto-reload)</label>
+          <label><input type="checkbox" id="sli-cfg-watch"> Hot-reload on change</label>
+        </div>
+      </div>
+      <div class="row">
+        <button class="red-ui-button" id="sli-btn-load"><i class="fa fa-download"></i> Load from file</button>
+        <button class="red-ui-button" id="sli-btn-save"><i class="fa fa-upload"></i> Save to file</button>
+        <button class="red-ui-button" id="sli-btn-template"><i class="fa fa-file-o"></i> Create template</button>
+      </div>
+    </div>
+
+    <!-- CONNECTION -->
+    <div class="row card">
+      <div class="inline cols-3">
+        <div>
+          <label><i class="fa fa-database"></i> Database path (typed)</label>
+          <input type="text" id="node-input-dbPath"><input type="hidden" id="node-input-dbPathType">
+        </div>
+        <div>
+          <label>Transaction mode</label>
+          <select id="node-input-txMode">
+            <option value="perTable">perTable</option>
+            <option value="all">all</option>
+            <option value="chunk">chunk</option>
+            <option value="off">off</option>
+          </select>
+        </div>
+        <div>
+          <label>Chunk size</label>
+          <input type="number" id="node-input-chunkSize" min="1" placeholder="500">
+        </div>
+      </div>
+      <div class="inline cols-4">
+        <div><label>&nbsp;</label><label><input type="checkbox" id="node-input-continueOnError"> Continue on error</label></div>
+        <div><label>&nbsp;</label><label><input type="checkbox" id="node-input-enableWAL"> PRAGMA WAL</label></div>
+        <div>
+          <label>PRAGMA synchronous</label>
+          <select id="node-input-syncMode">
+            <option value="">(default)</option><option value="OFF">OFF</option><option value="NORMAL">NORMAL</option><option value="FULL">FULL</option><option value="EXTRA">EXTRA</option>
+          </select>
+        </div>
+        <div>
+          <label>Extra PRAGMAs</label>
+          <input type="text" id="node-input-extraPragmas" placeholder="cache_size=20000; temp_store=MEMORY">
+        </div>
+      </div>
+    </div>
+
+    <!-- TABLES -->
+    <div class="row card">
+      <label><i class="fa fa-table"></i> Tables</label>
+      <table id="sli-groups">
+        <thead>
+          <tr>
+            <th style="width:180px">Table</th>
+            <th>Source</th>
+            <th style="width:120px">Auto-map</th>
+            <th style="width:140px">Conflict</th>
+            <th style="width:140px">Return</th>
+            <th style="width:120px" class="right">Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="hint" style="margin-top:6px">Each table has its own source, mapping/UPSERT and optional “return rows”.</div>
+      <div class="row"><button class="red-ui-button" id="sli-add"><i class="fa fa-plus"></i> Add table</button></div>
+    </div>
+
+    <div class="row">
+      <label>&nbsp;</label>
+      <label><input type="checkbox" id="node-input-mirrorToPayload"> Mirror summary to <code>msg.payload</code></label>
+    </div>
+  </div>
+</script>
+
+
+<script type="text/javascript">
+(function(){
+  const TYPE = "sqlite-link-insert";
+  const clone = x => JSON.parse(JSON.stringify(x||{}));
+
+  function renderGroups($tbody, groups){
+    $tbody.empty();
+    (groups||[]).forEach((g, idx)=>{
+      const srcLabel = `${g.sourceType || "msg"}:${g.source}`;
+      const retLabel = (g.returnRows && g.returnRows.mode !== "none")
+        ? `${g.returnRows.mode} → ${g.returnRows.pathType||"msg"}:${g.returnRows.path}` : "(none)";
+      const $tr = $(`
+        <tr>
+          <td>${g.table||""}</td>
+          <td title="${srcLabel}">${srcLabel.length>64?srcLabel.slice(0,64)+"…":srcLabel}</td>
+          <td>${g.autoMap ? "yes" : "no"}</td>
+          <td>${g.conflict || "none"}</td>
+          <td>${retLabel}</td>
+          <td class="right">
+            <button class="red-ui-button red-ui-button-small edit"><i class="fa fa-pencil"></i></button>
+            <button class="red-ui-button red-ui-button-small delete"><i class="fa fa-trash"></i></button>
+          </td>
+        </tr>
+      `);
+      $(".edit",$tr).on("click", ()=> openGroupDialog($tbody, groups, idx));
+      $(".delete",$tr).on("click", ()=> { groups.splice(idx,1); renderGroups($tbody, groups); });
+      $tbody.append($tr);
+    });
+  }
+
+  function addMapRow($tbody, row){
+    const r = Object.assign({ column:"", srcType:"path", src:"", transform:"none" }, row||{});
+    const $tr = $(`
+      <tr>
+        <td><input type="text" class="mi-col" placeholder="column"></td>
+        <td><input type="text" class="mi-src"><input type="hidden" class="mi-srcType"></td>
+        <td>
+          <select class="mi-tx">
+            <option value="none">none</option><option value="trim">trim</option><option value="upper">upper</option>
+            <option value="lower">lower</option><option value="nz">nz</option><option value="bool01">bool01</option>
+            <option value="number">number</option><option value="string">string</option>
+          </select>
+        </td>
+        <td class="right"><button class="red-ui-button red-ui-button-small mi-del"><i class="fa fa-trash"></i></button></td>
+      </tr>
+    `);
+    $(".mi-col",$tr).val(r.column);
+    const $src = $(".mi-src",$tr), $type=$(".mi-srcType",$tr);
+    $src.typedInput({ default:r.srcType||"path", types:[{value:"path",label:"path",icon:"fa fa-dot-circle-o"},"jsonata","msg","flow","global","env","str","num","bool","json"], typeField:$type });
+    $src.typedInput('type', r.srcType||"path"); $src.typedInput('value', r.src);
+    $(".mi-tx",$tr).val(r.transform||"none");
+    $(".mi-del",$tr).on("click", ()=> $tr.remove());
+    $tbody.append($tr);
+  }
+  function collectMapping($tbody){
+    const out=[]; $tbody.find("tr").each(function(){
+      const $tr=$(this);
+      const column = $(".mi-col",$tr).val().trim();
+      const src = $(".mi-src",$tr).typedInput('value');
+      const srcType = $(".mi-src",$tr).typedInput('type');
+      const transform = $(".mi-tx",$tr).val();
+      if (column) out.push({ col:column, source:"jsonata", srcType, src, transform });
+    }); return out;
+  }
+
+  function openGroupDialog($tbody, groups, index){
+    const isNew = (index == null);
+    const cur = isNew ? {
+      table:"", source:"payload", sourceType:"msg", autoMap:true, mapping:[],
+      conflict:"none", upsertKeys:[], updateColumns:[],
+      keySpec:{ enabled:false, mode:"byColumns", columns:[], separator:"|" },
+      returnRows:{ mode:"none", pathType:"msg", path:"" }
+    } : clone(groups[index]);
+
+    const $dlg = $(`
+      <div class="sli">
+        <div class="row inline cols-3">
+          <div><label>Table</label><input type="text" id="mi-f-table"></div>
+          <div><label>Source</label><input type="text" id="mi-f-src"><input type="hidden" id="mi-f-srcType"></div>
+          <div><label>Auto-map</label><label><input type="checkbox" id="mi-f-auto"> Enable</label></div>
+        </div>
+
+        <div class="row card" id="mi-map-card">
+          <label>Mapping</label>
+          <table><thead><tr><th style="width:180px">Column</th><th>Source</th><th style="width:160px">Transform</th><th style="width:84px" class="right">Actions</th></tr></thead><tbody id="mi-map-body"></tbody></table>
+          <div class="row"><button class="red-ui-button" id="mi-map-add"><i class="fa fa-plus"></i> Add column</button></div>
+        </div>
+
+        <div class="row card">
+          <div class="inline cols-3">
+            <div><label>Conflict</label>
+              <select id="mi-f-cs"><option value="none">none</option><option value="ignore">OR IGNORE</option><option value="replace">OR REPLACE</option><option value="upsert">UPSERT</option></select>
+            </div>
+            <div><label>UPSERT keys (comma)</label><input type="text" id="mi-f-keys"></div>
+            <div><label>Update columns (comma)</label><input type="text" id="mi-f-upd"></div>
+          </div>
+        </div>
+
+        <div class="row card">
+          <div class="inline cols-3">
+            <div><label>Return rows</label><select id="mi-f-retMode"><option value="none">(don’t return)</option><option value="affected">affected</option></select></div>
+            <div><label>ID column</label><input type="text" id="mi-f-retId" placeholder="id"></div>
+            <div><label>Return path</label><input type="text" id="mi-f-retPath"><input type="hidden" id="mi-f-retPathType"></div>
+          </div>
+        </div>
+      </div>
+    `).appendTo("body").dialog({
+      modal:true,
+      width: Math.floor($(window).width()*0.88),
+      height: Math.floor($(window).height()*0.88),
+      title: isNew ? "Add table" : "Edit table",
+      buttons: [
+        { text:"Cancel", click(){ $(this).dialog("destroy").remove(); } },
+        { text:"Save", class:"primary", click(){
+            const tbl = $("#mi-f-table").val().trim();
+            if (!tbl){ $("#mi-f-table").addClass("input-error"); return; }
+            const out = {
+              table: tbl,
+              source: $("#mi-f-src").typedInput('value'),
+              sourceType: $("#mi-f-src").typedInput('type'),
+              autoMap: $("#mi-f-auto").is(":checked"),
+              mapping: collectMapping($("#mi-map-body")),
+              conflict: $("#mi-f-cs").val(),
+              upsertKeys: String($("#mi-f-keys").val()||"").split(",").map(s=>s.trim()).filter(Boolean),
+              updateColumns: String($("#mi-f-upd").val()||"").split(",").map(s=>s.trim()).filter(Boolean),
+              keySpec: cur.keySpec || { enabled:false },
+              returnRows: {
+                mode: $("#mi-f-retMode").val(),
+                idColumn: $("#mi-f-retId").val().trim() || "id",
+                path: $("#mi-f-retPath").typedInput('value'),
+                pathType: $("#mi-f-retPath").typedInput('type')
+              }
+            };
+            if (isNew) groups.push(out); else groups[index]=out;
+            renderGroups($tbody, groups);
+            $(this).dialog("destroy").remove();
+        }}
+      ],
+      close(){ $(this).remove(); }
+    });
+
+    $("#mi-f-table").val(cur.table||"");
+    $("#mi-f-src").typedInput({ default: cur.sourceType||"msg", types:["msg","flow","global","jsonata","str","num","bool","json","env"], typeField:$("#mi-f-srcType") });
+    $("#mi-f-src").typedInput('type', cur.sourceType||"msg"); $("#mi-f-src").typedInput('value', cur.source||"payload");
+    $("#mi-f-auto").prop("checked", !!cur.autoMap);
+
+    const $mb = $("#mi-map-body").empty();
+    (cur.mapping||[]).forEach(m => addMapRow($mb, { column:m.col, srcType:m.srcType, src:m.src, transform:m.transform }));
+    $("#mi-map-add").on("click", ()=> addMapRow($mb));
+
+    const toggleMap = ()=> $("#mi-map-card").toggle(!$("#mi-f-auto").is(":checked"));
+    $("#mi-f-auto").on("change", toggleMap); toggleMap();
+
+    $("#mi-f-cs").val(cur.conflict || "none");
+    $("#mi-f-keys").val((cur.upsertKeys||[]).join(", "));
+    $("#mi-f-upd").val((cur.updateColumns||[]).join(", "));
+
+    $("#mi-f-retMode").val(cur?.returnRows?.mode || "none");
+    $("#mi-f-retId").val(cur?.returnRows?.idColumn || "id");
+    $("#mi-f-retPath").typedInput({ default: cur?.returnRows?.pathType||"msg", types:["msg","flow","global"], typeField:$("#mi-f-retPathType") });
+    $("#mi-f-retPath").typedInput('type', cur?.returnRows?.pathType||"msg");
+    $("#mi-f-retPath").typedInput('value', cur?.returnRows?.path || `sqlite.${cur.table||"Table"}.rows`);
+  }
+
+  RED.nodes.registerType(TYPE,{
+    category:'storage',
+    color:'#E6F2FF',
+    icon:'font-awesome/fa-database',
+    paletteLabel:'sqlite link insert',
+    defaults:{
+      name:{value:""},
+      dbPath:{value:""}, dbPathType:{value:"str"},
+      txMode:{value:"perTable"}, chunkSize:{value:500}, continueOnError:{value:false},
+      enableWAL:{value:true}, syncMode:{value:""}, extraPragmas:{value:""},
+      mirrorToPayload:{value:false},
+      groups:{value:[]},
+
+      // config-file fields (match .js)
+      useConfigFile:{value:false},
+      configPath:{value:""},
+      lockToFile:{value:false},
+      watchFile:{value:false}
+    },
+    inputs:1, outputs:1,
+    label(){ return this.name || "sqlite-link-insert"; },
+
+    oneditprepare: function(){
+      const self=this;
+
+      // typed DB path
+      $("#node-input-dbPath").typedInput({
+        default:self.dbPathType||'str',
+        types:['str','msg','flow','global','jsonata','env'],
+        typeField:$("#node-input-dbPathType")
+      });
+
+      // config-file UI
+      $("#sli-cfg-use").prop("checked", !!self.useConfigFile);
+      $("#sli-cfg-path").val(self.configPath || "");
+      $("#sli-cfg-lock").prop("checked", !!self.lockToFile);
+      $("#sli-cfg-watch").prop("checked", !!self.watchFile);
+
+      function setCfgEnabled(){
+        const on = $("#sli-cfg-use").is(":checked");
+        $("#sli-cfg-path, #sli-btn-load, #sli-btn-save, #sli-btn-template, #sli-cfg-lock, #sli-cfg-watch").prop("disabled", !on);
+      }
+      $("#sli-cfg-use").on("change", setCfgEnabled); setCfgEnabled();
+
+
+      // lock-state: when locked, disable ALL other fields & actions
+      function setLockState(){
+        const locked = $("#sli-cfg-lock").is(":checked");
+        const toDisable = [
+          "#sli-btn-load","#sli-btn-save","#sli-btn-template",
+          "#node-input-dbPath","#node-input-txMode","#node-input-chunkSize",
+          "#node-input-continueOnError","#node-input-enableWAL",
+          "#node-input-syncMode","#node-input-extraPragmas",
+          "#node-input-mirrorToPayload","#sli-add"
+        ];
+        $(toDisable.join(",")).prop("disabled", locked);
+        // also disable edit/delete buttons in the table
+        $("#sli-groups .edit, #sli-groups .delete").prop("disabled", locked);
+      }
+      $("#sli-cfg-lock").on("change", setLockState);
+      setLockState();
+
+
+      // groups list
+      const $tbody = $("#sli-groups tbody");
+      const groups = Array.isArray(self.groups) ? clone(self.groups) : [];
+      renderGroups($tbody, groups);
+
+      $("#sli-add").on("click", ()=> openGroupDialog($tbody, groups, null));
+
+      // config-file actions
+      function cfgPath(){ return $("#sli-cfg-path").val().trim(); }
+      function collectConfig(){
+        return {
+          txMode: $("#node-input-txMode").val(),
+          chunkSize: Number($("#node-input-chunkSize").val()||500),
+          continueOnError: $("#node-input-continueOnError").is(":checked"),
+          enableWAL: $("#node-input-enableWAL").is(":checked"),
+          syncMode: $("#node-input-syncMode").val() || "",
+          extraPragmas: $("#node-input-extraPragmas").val() || "",
+          mirrorToPayload: $("#node-input-mirrorToPayload").is(":checked"),
+          groups
+        };
+      }
+
+      $("#sli-btn-load").on("click", function(){
+        const p = cfgPath(); if (!p){ RED.notify("Config path is empty","error"); return; }
+        $.getJSON("sqlite-link-insert/config", { file:p })
+          .done((res)=>{
+            if (!res || !res.ok) return RED.notify(res?.error||"Load failed","error");
+            const c = res.config || {};
+            $("#node-input-txMode").val(c.txMode || self.txMode || "perTable");
+            $("#node-input-chunkSize").val(c.chunkSize || 500);
+            $("#node-input-continueOnError").prop("checked", !!c.continueOnError);
+            $("#node-input-enableWAL").prop("checked", !!c.enableWAL);
+            $("#node-input-syncMode").val(c.syncMode || "");
+            $("#node-input-extraPragmas").val(c.extraPragmas || "");
+            $("#node-input-mirrorToPayload").prop("checked", !!c.mirrorToPayload);
+            groups.splice(0, groups.length, ...(Array.isArray(c.groups)?c.groups:[]));
+            renderGroups($tbody, groups);
+            RED.notify("Loaded configuration","success");
+          })
+          .fail((xhr)=> RED.notify(xhr?.responseJSON?.error || "Load failed","error"));
+      });
+
+      $("#sli-btn-save").on("click", function(){
+        const p = cfgPath(); if (!p){ RED.notify("Config path is empty","error"); return; }
+        const body = { file:p, config: collectConfig() };
+        $.ajax({ url:"sqlite-link-insert/config", method:"POST", contentType:"application/json", data: JSON.stringify(body) })
+          .done(()=> RED.notify("Saved configuration","success"))
+          .fail((xhr)=> RED.notify(xhr?.responseJSON?.error || "Save failed","error"));
+      });
+
+      $("#sli-btn-template").on("click", function(){
+        const p = cfgPath(); if (!p){ RED.notify("Config path is empty","error"); return; }
+        $.getJSON("sqlite-link-insert/template")
+          .done((res)=>{
+            const body = { file:p, config: res.template };
+            $.ajax({ url:"sqlite-link-insert/config", method:"POST", contentType:"application/json", data: JSON.stringify(body) })
+              .done(()=> RED.notify("Template written","success"))
+              .fail((xhr)=> RED.notify(xhr?.responseJSON?.error || "Write failed","error"));
+          })
+          .fail(()=> RED.notify("Template fetch failed","error"));
+      });
+
+      // collect hook for oneditsave
+      this._collect = ()=> groups;
+    },
+
+    oneditsave: function(){
+      this.useConfigFile = $("#sli-cfg-use").is(":checked");
+      this.configPath    = $("#sli-cfg-path").val().trim();
+      this.lockToFile    = $("#sli-cfg-lock").is(":checked");
+      this.watchFile     = $("#sli-cfg-watch").is(":checked");
+
+      this.groups = this._collect ? this._collect() : [];
+    }
+  });
+})();
+</script>
+
+
+<script type="text/x-red" data-help-name="sqlite-link-insert">
+  <p><b>SQLite Link Insert</b> — multi-table inserts with FK lookups & UPSERT.</p>
+  <p>Supports loading/saving a runtime configuration to a JSON file under <code>userDir</code>, lock-to-file on deploy, and optional file watching for hot-reload.</p>
+</script>
