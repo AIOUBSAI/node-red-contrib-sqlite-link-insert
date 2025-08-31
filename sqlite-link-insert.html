@@ -223,7 +223,7 @@
         </div>
       </div>
     `).appendTo("body").dialog({
-      modal:true,
+      modal:false,
       width: Math.floor($(window).width()*0.88),
       height: Math.floor($(window).height()*0.88),
       title: isNew ? "Add table" : "Edit table",
@@ -425,4 +425,5 @@
 <script type="text/x-red" data-help-name="sqlite-link-insert">
   <p><b>SQLite Link Insert</b> — multi-table inserts with FK lookups & UPSERT.</p>
   <p>Supports loading/saving a runtime configuration to a JSON file under <code>userDir</code>, lock-to-file on deploy, and optional file watching for hot-reload.</p>
+
 </script>
