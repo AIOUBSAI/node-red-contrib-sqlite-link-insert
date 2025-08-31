@@ -1,6 +1,6 @@
 {
   "name": "node-red-contrib-sqlite-link-insert",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A Node-RED node for grouped multi-table SQLite inserts with UPSERT, mapping, key lookups, and optional config-file support.",
   "keywords": [
     "node-red",
@@ -43,3 +43,4 @@
     "LICENSE"
   ]
 }
+
